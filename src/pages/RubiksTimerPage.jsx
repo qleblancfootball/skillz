@@ -53,7 +53,9 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
     setFinalTimerMs(elapsed)
   }
 
-  function handlePointerDown() {
+  function handlePointerDown(e) {
+    e.preventDefault()
+
     if (phase === 'idle') {
       setPhase('armingStart')
       return
@@ -64,7 +66,9 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e) {
+    e.preventDefault()
+
     if (phase === 'armingStart') {
       setTimerMs(0)
       setFinalTimerMs(null)
@@ -77,6 +81,10 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
       stopTimer()
       setPhase('review')
     }
+  }
+
+  function handleContextMenu(e) {
+    e.preventDefault()
   }
 
   function handleSave() {
@@ -92,6 +100,7 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
     setTimerMs(0)
     setFinalTimerMs(null)
     setPhase('idle')
+    onBack()
   }
 
   function handleDiscard() {
@@ -146,6 +155,7 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
     <div
       onPointerDown={finalTimerMs === null ? handlePointerDown : undefined}
       onPointerUp={finalTimerMs === null ? handlePointerUp : undefined}
+      onContextMenu={handleContextMenu}
       style={{
         minHeight: '100vh',
         background: getBackground(),
@@ -154,7 +164,9 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
         flexDirection: 'column',
         position: 'relative',
         userSelect: 'none',
-        touchAction: 'manipulation',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+        touchAction: 'none',
       }}
     >
       <div
@@ -190,6 +202,9 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
           justifyContent: 'center',
           padding: '24px',
           textAlign: 'center',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
         }}
       >
         <div>
@@ -213,6 +228,8 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
               lineHeight: 1,
               fontWeight: 900,
               letterSpacing: '-0.05em',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
             }}
           >
             {getCenterText()}
@@ -250,7 +267,8 @@ export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
               maxWidth: '420px',
               borderRadius: '22px',
               border: '1px solid rgba(255,255,255,0.08)',
-              background: 'linear-gradient(145deg, rgba(13, 20, 36, 0.98), rgba(9, 14, 25, 0.95))',
+              background:
+                'linear-gradient(145deg, rgba(13, 20, 36, 0.98), rgba(9, 14, 25, 0.95))',
               boxShadow: '0 18px 60px rgba(0,0,0,0.28)',
               padding: '18px',
             }}

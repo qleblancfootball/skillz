@@ -24,6 +24,7 @@ export default function CategoryPage({
   const [pbLabel, setPbLabel] = useState('')
   const [image, setImage] = useState('')
   const [notes, setNotes] = useState('')
+  const [goal, setGoal] = useState('')
   const [higherIsBetter, setHigherIsBetter] = useState(true)
 
   const filteredSkills = useMemo(() => {
@@ -50,6 +51,7 @@ export default function CategoryPage({
       higherIsBetter,
       image: image.trim(),
       notes: notes.trim(),
+      goal: goal.trim(),
       lastUpdated: getTodayDate(),
     })
 
@@ -61,12 +63,18 @@ export default function CategoryPage({
     setPbLabel('')
     setImage('')
     setNotes('')
+    setGoal('')
     setHigherIsBetter(true)
     setShowForm(false)
   }
 
   function handleAddRubiksPreset() {
     onAddPresetSkill(category.id, 'rubiks_timer')
+    setShowForm(false)
+  }
+
+  function handleAddSpanishPreset() {
+    onAddPresetSkill(category.id, 'spanish_vocab')
     setShowForm(false)
   }
 
@@ -116,53 +124,61 @@ export default function CategoryPage({
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid rgba(255,255,255,0.08)',
               padding: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-              flexWrap: 'wrap',
+              display: 'grid',
+              gap: '10px',
             }}
           >
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: '12px',
-                  color: '#94a3b8',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  fontWeight: 800,
-                }}
-              >
-                Quick Preset
-              </p>
-              <p
-                style={{
-                  margin: '4px 0 0 0',
-                  color: '#e2e8f0',
-                  fontWeight: 700,
-                }}
-              >
-                Rubik&apos;s Solving timer
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleAddRubiksPreset}
+            <div
               style={{
-                border: 'none',
-                borderRadius: '999px',
-                background: 'rgba(34,211,238,0.16)',
-                color: '#67e8f9',
-                padding: '10px 14px',
+                fontSize: '12px',
+                color: '#94a3b8',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
                 fontWeight: 800,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
               }}
             >
-              Add Preset
-            </button>
+              Quick Presets
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '10px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleAddRubiksPreset}
+                style={{
+                  border: 'none',
+                  borderRadius: '14px',
+                  background: 'rgba(34,211,238,0.16)',
+                  color: '#67e8f9',
+                  padding: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Rubik&apos;s Timer
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAddSpanishPreset}
+                style={{
+                  border: 'none',
+                  borderRadius: '14px',
+                  background: 'rgba(168,85,247,0.18)',
+                  color: '#e9d5ff',
+                  padding: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Spanish Vocab
+              </button>
+            </div>
           </div>
 
           <div className="field-group">
@@ -219,6 +235,16 @@ export default function CategoryPage({
                 <option value="lower">Lower is better</option>
               </select>
             </div>
+          </div>
+
+          <div className="field-group">
+            <label className="field-label">Goal</label>
+            <input
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="Example: 5, 4.8, 100"
+              className="app-input"
+            />
           </div>
 
           <div className="field-group">

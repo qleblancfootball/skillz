@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
@@ -46,9 +46,7 @@ export default function App() {
       try {
         const { data, error } = await supabase.auth.getUser()
         if (error) throw error
-
         if (!mounted) return
-
         setCurrentUser(data.user ?? null)
       } catch (err) {
         console.error(err)
@@ -139,6 +137,7 @@ export default function App() {
         progress,
         templateType: skill.template_type,
         isPresetLocked: skill.is_preset_locked,
+        goal: skill.goal ?? '',
       }
     })
   }, [skillsRaw, progressEntries])
@@ -199,6 +198,10 @@ export default function App() {
   }
 
   function getRecalculatedPb(skill, progressList) {
+    if (skill.templateType === 'spanish_vocab') {
+      return String(progressList.length)
+    }
+
     const numericEntries = progressList
       .map((entry) => ({
         raw: entry.value,
@@ -237,7 +240,10 @@ export default function App() {
       const skill = skills.find((s) => s.id === skillId)
       if (!skill || !currentUser) return
 
-      const cleanedValue = cleanEntryValue(entryData.value, skill.unit)
+      const cleanedValue =
+        skill.templateType === 'spanish_vocab'
+          ? entryData.value.trim()
+          : cleanEntryValue(entryData.value, skill.unit)
 
       const newProgress = [
         {
@@ -284,6 +290,7 @@ export default function App() {
         notes: updates.notes,
         ranking: updates.ranking,
         image: updates.image,
+        goal: updates.goal ?? '',
       })
 
       await loadAppData()
@@ -320,7 +327,10 @@ export default function App() {
       const skill = skills.find((s) => s.id === skillId)
       if (!skill) return
 
-      const cleanedValue = cleanEntryValue(updatedEntry.value, skill.unit)
+      const cleanedValue =
+        skill.templateType === 'spanish_vocab'
+          ? updatedEntry.value.trim()
+          : cleanEntryValue(updatedEntry.value, skill.unit)
 
       const updatedProgress = skill.progress.map((entry) => {
         if (entry.id !== entryId) return entry
@@ -404,6 +414,7 @@ export default function App() {
           last_updated: newSkill.lastUpdated || null,
           template_type: newSkill.templateType || '',
           is_preset_locked: !!newSkill.isPresetLocked,
+          goal: newSkill.goal || '',
         },
         currentUser.id
       )
@@ -443,6 +454,36 @@ export default function App() {
         lastUpdated: new Date().toISOString().split('T')[0],
         templateType: 'rubiks_timer',
         isPresetLocked: true,
+        goal: '',
+      })
+    }
+
+    if (presetKey === 'spanish_vocab') {
+      const alreadyExists = skills.some(
+        (skill) =>
+          skill.categoryId === categoryId && skill.templateType === 'spanish_vocab'
+      )
+
+      if (alreadyExists) {
+        window.alert('Spanish Vocabulary already exists in this category.')
+        return
+      }
+
+      addNewSkill({
+        categoryId,
+        name: 'Spanish Vocabulary',
+        pb: '0',
+        ranking: '—',
+        unit: 'words',
+        valueLabel: 'Spanish Word',
+        pbLabel: 'Words Learned',
+        higherIsBetter: true,
+        image: '',
+        notes: 'Tap a card to flip between Spanish and English.',
+        lastUpdated: new Date().toISOString().split('T')[0],
+        templateType: 'spanish_vocab',
+        isPresetLocked: true,
+        goal: '',
       })
     }
   }

@@ -12,7 +12,7 @@ export default function Layout({ title, subtitle, onBack, children }) {
                 ← Back
               </button>
             ) : (
-              <div className="brand-pill">QT Tracker</div>
+              <div className="brand-pill">QL SKILZ</div>
             )}
           </div>
 
