@@ -37,12 +37,13 @@ export default function RubiksTimerPage({
   const [timerState, setTimerState] = useState('idle')
   const [displaySeconds, setDisplaySeconds] = useState(0)
   const [stoppedSeconds, setStoppedSeconds] = useState(null)
-  const [solveNote, setSolveNote] = useState('')
   const [showCelebration, setShowCelebration] = useState(false)
 
   const [scrambleBank, setScrambleBank] = useState(() => generateScrambleBank(100))
-  const [scrambleIndex, setScrambleIndex] = useState(0)
-  const [scrambleConfirmed, setScrambleConfirmed] = useState(activityType !== 'scramble_timer')
+  const [selectedScramble, setSelectedScramble] = useState('')
+  const [scrambleConfirmed, setScrambleConfirmed] = useState(
+    activityType !== 'scramble_timer'
+  )
 
   const [ao5Solves, setAo5Solves] = useState([])
   const [ao5NeedsContinue, setAo5NeedsContinue] = useState(false)
@@ -68,9 +69,14 @@ export default function RubiksTimerPage({
     }
   }, [])
 
-  const currentScramble = useMemo(() => {
-    return scrambleBank[scrambleIndex] || ''
-  }, [scrambleBank, scrambleIndex])
+  useEffect(() => {
+    if (activityType === 'scramble_timer') {
+      const bank = generateScrambleBank(100)
+      setScrambleBank(bank)
+      setSelectedScramble(bank[Math.floor(Math.random() * bank.length)] || '')
+      setScrambleConfirmed(false)
+    }
+  }, [activityType])
 
   const currentAo5Number = ao5Solves.length + 1
   const ao5Average = ao5Complete ? calculateAo5(ao5Solves) : null
@@ -85,6 +91,14 @@ export default function RubiksTimerPage({
     setStoppedSeconds(null)
   }
 
+  function resetScrambleFlow() {
+    const bank = generateScrambleBank(100)
+    const randomScramble = bank[Math.floor(Math.random() * bank.length)] || ''
+    setScrambleBank(bank)
+    setSelectedScramble(randomScramble)
+    setScrambleConfirmed(false)
+  }
+
   function animateTimer() {
     if (!startTimeRef.current) return
 
@@ -97,7 +111,6 @@ export default function RubiksTimerPage({
   function startTimer() {
     cancelAnimationFrame(rafRef.current)
     setStoppedSeconds(null)
-    setSolveNote('')
     setTimerState('running')
     startTimeRef.current = performance.now()
     rafRef.current = requestAnimationFrame(animateTimer)
@@ -109,7 +122,7 @@ export default function RubiksTimerPage({
     cancelAnimationFrame(rafRef.current)
 
     const elapsedSeconds = Number(
-      (((performance.now() - startTimeRef.current) / 1000)).toFixed(2)
+      ((performance.now() - startTimeRef.current) / 1000).toFixed(2)
     )
 
     setDisplaySeconds(elapsedSeconds)
@@ -222,15 +235,27 @@ export default function RubiksTimerPage({
     }, 2200)
   }
 
-  async function saveRegularOrScrambleSolve() {
+  async function promptSaveSingleSolve() {
     if (stoppedSeconds === null) return
 
-    let note = solveNote.trim()
+    const shouldSave = window.confirm(
+      `Save ${formatSolveTime(stoppedSeconds)} to your leaderboard?`
+    )
 
-    if (activityType === 'scramble_timer' && currentScramble) {
-      note = note
-        ? `Scramble: ${currentScramble}\n\n${note}`
-        : `Scramble: ${currentScramble}`
+    if (!shouldSave) {
+      if (activityType === 'scramble_timer') {
+        resetTimerFace()
+        resetScrambleFlow()
+      } else {
+        resetTimerFace()
+      }
+      return
+    }
+
+    let note = ''
+
+    if (activityType === 'scramble_timer' && selectedScramble) {
+      note = `Scramble: ${selectedScramble}`
     }
 
     await onSaveSolve({
@@ -242,36 +267,34 @@ export default function RubiksTimerPage({
     await maybeCelebrateAndPrompt(stoppedSeconds.toFixed(2))
 
     if (activityType === 'scramble_timer') {
-      const nextIndex = scrambleIndex + 1
-
-      if (nextIndex >= scrambleBank.length) {
-        setScrambleBank(generateScrambleBank(100))
-        setScrambleIndex(0)
-      } else {
-        setScrambleIndex(nextIndex)
-      }
-
-      setScrambleConfirmed(false)
+      resetTimerFace()
+      resetScrambleFlow()
+    } else {
+      resetTimerFace()
     }
-
-    resetTimerFace()
   }
 
   async function saveAo5Session() {
     if (!ao5Complete || ao5Average === null) return
 
-    const noteLines = [
-      `Ao5 solves: ${ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}`,
-    ]
+    const shouldSave = window.confirm(
+      `Save Ao5 result ${formatSolveTime(ao5Average)} to your leaderboard?`
+    )
 
-    if (solveNote.trim()) {
-      noteLines.push('', solveNote.trim())
+    if (!shouldSave) {
+      setAo5Solves([])
+      setAo5NeedsContinue(false)
+      setAo5Complete(false)
+      resetTimerFace()
+      return
     }
+
+    const note = `Ao5 solves: ${ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}`
 
     await onSaveSolve({
       date: formatDateInput(),
       value: ao5Average.toFixed(2),
-      note: noteLines.join('\n'),
+      note,
     })
 
     await maybeCelebrateAndPrompt(ao5Average.toFixed(2))
@@ -279,7 +302,6 @@ export default function RubiksTimerPage({
     setAo5Solves([])
     setAo5NeedsContinue(false)
     setAo5Complete(false)
-    setSolveNote('')
     resetTimerFace()
   }
 
@@ -300,21 +322,21 @@ export default function RubiksTimerPage({
       return 'Scramble Timer'
     }
 
-    return 'Regular Timer'
+    return activityLabel
   }
 
   function getTimerHelpText() {
     if (timerState === 'holding') return 'Keep holding...'
     if (timerState === 'ready') return 'Release to start'
     if (timerState === 'running') return 'Tap screen or press space to stop'
-    if (timerState === 'stopped') return 'Review and save your result'
+    if (timerState === 'stopped') return 'Solve complete'
 
     if (activityType === 'scramble_timer' && !scrambleConfirmed) {
-      return 'Choose and confirm a scramble before starting'
+      return 'Confirm the scramble to begin'
     }
 
     if (activityType === 'ao5_timer' && ao5NeedsContinue) {
-      return 'Continue when you are ready for the next solve'
+      return 'Continue when ready for the next solve'
     }
 
     return 'Hold the screen or press space, then release to start'
@@ -328,286 +350,167 @@ export default function RubiksTimerPage({
     return ''
   }
 
+  if (activityType === 'scramble_timer' && !scrambleConfirmed) {
+    return (
+      <div className="timer-page-shell timer-page-shell-centered">
+        {showCelebration ? <CelebrationOverlay /> : null}
+
+        <div className="timer-page-topbar">
+          <button type="button" className="timer-back-button" onClick={onBack}>
+            ← Back
+          </button>
+
+          <div className="timer-top-pill">{activityLabel}</div>
+        </div>
+
+        <div className="timer-confirm-wrap">
+          <div className="timer-confirm-card">
+            <p className="timer-confirm-label">Random Scramble</p>
+            <h1 className="timer-confirm-title">{skill.name}</h1>
+            <p className="timer-confirm-scramble">{selectedScramble}</p>
+
+            <div className="timer-action-row">
+              <button
+                type="button"
+                className="timer-action-button"
+                onClick={() => setScrambleConfirmed(true)}
+              >
+                Confirm Scramble
+              </button>
+
+              <button
+                type="button"
+                className="timer-secondary-button"
+                onClick={resetScrambleFlow}
+              >
+                New Random Scramble
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="timer-page-shell">
+    <div className="timer-page-shell timer-page-shell-full">
       {showCelebration ? <CelebrationOverlay /> : null}
 
-      <div className="timer-page-topbar">
+      <div className="timer-page-topbar timer-page-topbar-overlay">
         <button type="button" className="timer-back-button" onClick={onBack}>
           ← Back
         </button>
 
-        <div className="timer-top-pill">{activityLabel}</div>
+        <div className="timer-top-pill">{getTimerLabel()}</div>
       </div>
 
-      <div className="timer-page-body">
-        <div className="timer-info-card">
-          <h1 className="timer-info-title">{skill.name}</h1>
-          <p className="timer-info-text">
-            PB: {skill.pb ? formatSolveTime(skill.pb) : 'No PB yet'} • Goal:{' '}
-            {skill.goal ? formatSolveTime(skill.goal) : 'Not set'}
-          </p>
+      <div
+        className={`timer-screen timer-screen-full ${getScreenStateClass()}`}
+        role="button"
+        tabIndex={0}
+        onMouseDown={handlePressStart}
+        onMouseUp={handlePressEnd}
+        onMouseLeave={handlePressEnd}
+        onTouchStart={handlePressStart}
+        onTouchEnd={handlePressEnd}
+        onTouchCancel={handlePressEnd}
+      >
+        {activityType === 'scramble_timer' && selectedScramble ? (
+          <div className="timer-floating-scramble">{selectedScramble}</div>
+        ) : null}
+
+        {activityType === 'ao5_timer' ? (
+          <div className="timer-floating-progress">
+            {ao5Solves.map((solve, index) => (
+              <span key={`${solve}-${index}`} className="timer-progress-pill">
+                {index + 1}: {formatSolveTime(solve)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="timer-value">
+          {formatSolveTime(
+            timerState === 'stopped' ? stoppedSeconds : displaySeconds
+          )}
         </div>
 
-        <div className="mini-grid">
-          <div className="mini-card">
-            <p className="mini-card-label">PB</p>
-            <p className="mini-card-value">
-              {skill.pb ? formatSolveTime(skill.pb) : '—'}
-            </p>
+        <div className="timer-help">{getTimerHelpText()}</div>
+
+        {activityType === 'ao5_timer' && ao5NeedsContinue ? (
+          <button
+            type="button"
+            className="timer-overlay-button"
+            onClick={continueAo5}
+          >
+            Continue to Solve {currentAo5Number}
+          </button>
+        ) : null}
+
+        {activityType === 'ao5_timer' && ao5Complete ? (
+          <div className="timer-overlay-panel">
+            <div className="timer-overlay-title">
+              Ao5 Result: {ao5Average !== null ? formatSolveTime(ao5Average) : '—'}
+            </div>
+
+            <div className="timer-action-row">
+              <button
+                type="button"
+                className="timer-action-button"
+                onClick={saveAo5Session}
+              >
+                Save Ao5
+              </button>
+
+              <button
+                type="button"
+                className="timer-secondary-button"
+                onClick={() => {
+                  setAo5Solves([])
+                  setAo5NeedsContinue(false)
+                  setAo5Complete(false)
+                  resetTimerFace()
+                }}
+              >
+                Reset Session
+              </button>
+            </div>
           </div>
+        ) : null}
 
-          <div className="mini-card">
-            <p className="mini-card-label">Goal</p>
-            <p className="mini-card-value">
-              {skill.goal ? formatSolveTime(skill.goal) : '—'}
-            </p>
+        {(activityType === 'regular_timer' || activityType === 'scramble_timer') &&
+        timerState === 'stopped' ? (
+          <div className="timer-overlay-panel">
+            <div className="timer-overlay-title">
+              Solve: {formatSolveTime(stoppedSeconds)}
+            </div>
+
+            <div className="timer-action-row">
+              <button
+                type="button"
+                className="timer-action-button"
+                onClick={promptSaveSingleSolve}
+              >
+                Continue
+              </button>
+
+              <button
+                type="button"
+                className="timer-secondary-button"
+                onClick={() => {
+                  if (activityType === 'scramble_timer') {
+                    resetTimerFace()
+                    resetScrambleFlow()
+                  } else {
+                    resetTimerFace()
+                  }
+                }}
+              >
+                Discard
+              </button>
+            </div>
           </div>
-
-          <div className="mini-card">
-            <p className="mini-card-label">History</p>
-            <p className="mini-card-value">{skill.progress.length}</p>
-          </div>
-        </div>
-
-        <div
-          className={`timer-screen ${getScreenStateClass()}`}
-          role="button"
-          tabIndex={0}
-          onMouseDown={handlePressStart}
-          onMouseUp={handlePressEnd}
-          onMouseLeave={handlePressEnd}
-          onTouchStart={handlePressStart}
-          onTouchEnd={handlePressEnd}
-          onTouchCancel={handlePressEnd}
-        >
-          <div className="timer-label">{getTimerLabel()}</div>
-          <div className="timer-value">
-            {formatSolveTime(
-              timerState === 'stopped' ? stoppedSeconds : displaySeconds
-            )}
-          </div>
-          <div className="timer-help">{getTimerHelpText()}</div>
-        </div>
-
-        <div className="timer-bottom-card">
-          {activityType === 'scramble_timer' && !scrambleConfirmed ? (
-            <>
-              <h3 className="panel-title">Scramble Bank</h3>
-              <div className="scramble-bank">
-                {scrambleBank.slice(scrambleIndex, scrambleIndex + 8).map((scramble, index) => {
-                  const actualIndex = scrambleIndex + index
-                  const isActive = actualIndex === scrambleIndex
-
-                  return (
-                    <button
-                      key={`${scramble}-${actualIndex}`}
-                      type="button"
-                      className={`scramble-card ${isActive ? 'active' : ''}`}
-                      onClick={() => setScrambleIndex(actualIndex)}
-                    >
-                      <p className="scramble-index">Scramble {actualIndex + 1}</p>
-                      <p className="scramble-text">{scramble}</p>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="timer-action-row" style={{ marginTop: '12px' }}>
-                <button
-                  type="button"
-                  className="timer-action-button"
-                  onClick={() => setScrambleConfirmed(true)}
-                >
-                  Use This Scramble
-                </button>
-
-                <button
-                  type="button"
-                  className="timer-secondary-button"
-                  onClick={() => setScrambleBank(generateScrambleBank(100))}
-                >
-                  Regenerate Bank
-                </button>
-              </div>
-            </>
-          ) : null}
-
-          {activityType === 'scramble_timer' && scrambleConfirmed ? (
-            <>
-              <h3 className="panel-title">Current Scramble</h3>
-              <p className="scramble-text">{currentScramble}</p>
-
-              {timerState === 'stopped' ? (
-                <>
-                  <div className="field-group" style={{ marginTop: '14px' }}>
-                    <label className="field-label">Solve Note (optional)</label>
-                    <textarea
-                      value={solveNote}
-                      onChange={(e) => setSolveNote(e.target.value)}
-                      rows="4"
-                      className="app-input app-textarea"
-                      placeholder="Add quick thoughts on the solve"
-                    />
-                  </div>
-
-                  <div className="timer-action-row">
-                    <button
-                      type="button"
-                      className="timer-action-button"
-                      onClick={saveRegularOrScrambleSolve}
-                    >
-                      Save Solve
-                    </button>
-
-                    <button
-                      type="button"
-                      className="timer-secondary-button"
-                      onClick={resetTimerFace}
-                    >
-                      Discard
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </>
-          ) : null}
-
-          {activityType === 'regular_timer' ? (
-            <>
-              <h3 className="panel-title">Regular Solve</h3>
-              <p className="timer-info-text">
-                Standard timer flow. Record the time, then optionally attach a note.
-              </p>
-
-              {timerState === 'stopped' ? (
-                <>
-                  <div className="field-group" style={{ marginTop: '14px' }}>
-                    <label className="field-label">Solve Note (optional)</label>
-                    <textarea
-                      value={solveNote}
-                      onChange={(e) => setSolveNote(e.target.value)}
-                      rows="4"
-                      className="app-input app-textarea"
-                      placeholder="What happened on this solve?"
-                    />
-                  </div>
-
-                  <div className="timer-action-row">
-                    <button
-                      type="button"
-                      className="timer-action-button"
-                      onClick={saveRegularOrScrambleSolve}
-                    >
-                      Save Solve
-                    </button>
-
-                    <button
-                      type="button"
-                      className="timer-secondary-button"
-                      onClick={resetTimerFace}
-                    >
-                      Discard
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </>
-          ) : null}
-
-          {activityType === 'ao5_timer' ? (
-            <>
-              <h3 className="panel-title">Ao5 Session</h3>
-              <p className="timer-info-text">
-                Complete five solves in sequence. The saved result uses the middle
-                three solves as the average.
-              </p>
-
-              <div className="ao5-splits">
-                {Array.from({ length: 5 }).map((_, index) => {
-                  const solve = ao5Solves[index]
-
-                  return (
-                    <div key={index} className="ao5-split-row">
-                      <strong>Solve {index + 1}</strong>
-                      <span>{solve ? formatSolveTime(solve) : 'Pending'}</span>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {ao5NeedsContinue ? (
-                <div className="timer-action-row" style={{ marginTop: '14px' }}>
-                  <button
-                    type="button"
-                    className="timer-action-button"
-                    onClick={continueAo5}
-                  >
-                    Continue to Solve {currentAo5Number}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="timer-secondary-button"
-                    onClick={() => {
-                      setAo5Solves([])
-                      setAo5NeedsContinue(false)
-                      setAo5Complete(false)
-                      resetTimerFace()
-                    }}
-                  >
-                    Reset Session
-                  </button>
-                </div>
-              ) : null}
-
-              {ao5Complete ? (
-                <>
-                  <div className="field-group" style={{ marginTop: '14px' }}>
-                    <label className="field-label">Ao5 Note (optional)</label>
-                    <textarea
-                      value={solveNote}
-                      onChange={(e) => setSolveNote(e.target.value)}
-                      rows="4"
-                      className="app-input app-textarea"
-                      placeholder="Add notes about the whole session"
-                    />
-                  </div>
-
-                  <div className="mini-card" style={{ marginTop: '12px' }}>
-                    <p className="mini-card-label">Calculated Ao5</p>
-                    <p className="mini-card-value">
-                      {ao5Average !== null ? formatSolveTime(ao5Average) : '—'}
-                    </p>
-                  </div>
-
-                  <div className="timer-action-row" style={{ marginTop: '12px' }}>
-                    <button
-                      type="button"
-                      className="timer-action-button"
-                      onClick={saveAo5Session}
-                    >
-                      Save Ao5 Result
-                    </button>
-
-                    <button
-                      type="button"
-                      className="timer-secondary-button"
-                      onClick={() => {
-                        setAo5Solves([])
-                        setAo5NeedsContinue(false)
-                        setAo5Complete(false)
-                        resetTimerFace()
-                      }}
-                    >
-                      Start Fresh
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     </div>
   )
