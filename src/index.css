@@ -246,7 +246,6 @@ a {
   border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
-  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .compact-hero {
@@ -1098,7 +1097,7 @@ a {
   position: absolute;
   left: 20px;
   right: 20px;
-  bottom: 26px;
+  bottom: max(20px, calc(16px + env(safe-area-inset-bottom)));
   margin: 0 auto;
   width: min(100%, 720px);
   border: 1px solid var(--line);
@@ -1107,6 +1106,8 @@ a {
   padding: 18px;
   z-index: 1;
   box-shadow: var(--shadow);
+  max-height: 45vh;
+  overflow-y: auto;
 }
 
 .timer-overlay-title {
@@ -1294,8 +1295,19 @@ a {
   }
 
   .timer-overlay-panel {
-    left: 16px;
-    right: 16px;
-    bottom: 18px;
+    left: 12px;
+    right: 12px;
+    bottom: max(12px, calc(12px + env(safe-area-inset-bottom)));
+    width: auto;
+    max-height: 48vh;
+    padding: 14px;
+  }
+
+  .timer-overlay-title {
+    font-size: 20px;
+  }
+
+  .timer-action-row {
+    grid-template-columns: 1fr;
   }
 }
