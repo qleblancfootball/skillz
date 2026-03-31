@@ -1,402 +1,614 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  calculateAo5,
+  compareGoalHit,
+  formatDateInput,
+  formatSolveTime,
+  generateScrambleBank,
+  getActivityTypeLabel,
+} from '../lib/rubiks'
 
-function getTodayDate() {
-  return new Date().toISOString().split('T')[0]
+function CelebrationOverlay() {
+  return (
+    <div className="celebration-overlay">
+      <div className="firework firework-1" />
+      <div className="firework firework-2" />
+      <div className="firework firework-3" />
+      <div className="firework firework-4" />
+      <div className="firework firework-5" />
+
+      <div>
+        <div className="celebration-text">Goal Crushed 🎉</div>
+        <div className="celebration-subtext">That solve hit your target time.</div>
+      </div>
+    </div>
+  )
 }
 
-function formatTimerDisplay(ms) {
-  const totalSeconds = ms / 1000
+export default function RubiksTimerPage({
+  skill,
+  onBack,
+  onSaveSolve,
+  onUpdateSkill,
+}) {
+  const activityType = skill.templateType || 'regular_timer'
+  const activityLabel = getActivityTypeLabel(activityType)
 
-  if (totalSeconds < 60) {
-    return totalSeconds.toFixed(2)
-  }
+  const [timerState, setTimerState] = useState('idle')
+  const [displaySeconds, setDisplaySeconds] = useState(0)
+  const [stoppedSeconds, setStoppedSeconds] = useState(null)
+  const [solveNote, setSolveNote] = useState('')
+  const [showCelebration, setShowCelebration] = useState(false)
 
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = (totalSeconds % 60).toFixed(2).padStart(5, '0')
-  return `${minutes}:${seconds}`
-}
+  const [scrambleBank, setScrambleBank] = useState(() => generateScrambleBank(100))
+  const [scrambleIndex, setScrambleIndex] = useState(0)
+  const [scrambleConfirmed, setScrambleConfirmed] = useState(activityType !== 'scramble_timer')
 
-export default function RubiksTimerPage({ skill, onBack, onSaveSolve }) {
-  const [phase, setPhase] = useState('idle')
-  const [timerMs, setTimerMs] = useState(0)
-  const [finalTimerMs, setFinalTimerMs] = useState(null)
-  const [note, setNote] = useState('')
+  const [ao5Solves, setAo5Solves] = useState([])
+  const [ao5NeedsContinue, setAo5NeedsContinue] = useState(false)
+  const [ao5Complete, setAo5Complete] = useState(false)
 
-  const timerStartRef = useRef(null)
-  const timerIntervalRef = useRef(null)
+  const rafRef = useRef(null)
+  const readyTimeoutRef = useRef(null)
+  const startTimeRef = useRef(null)
+  const pointerHoldingRef = useRef(false)
+  const currentStateRef = useRef('idle')
 
   useEffect(() => {
+    currentStateRef.current = timerState
+  }, [timerState])
+
+  useEffect(() => {
+    document.body.classList.add('timer-page-active')
+
     return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current)
-      }
+      document.body.classList.remove('timer-page-active')
+      clearTimeout(readyTimeoutRef.current)
+      cancelAnimationFrame(rafRef.current)
     }
   }, [])
 
-  function startTimer() {
-    timerStartRef.current = performance.now()
+  const currentScramble = useMemo(() => {
+    return scrambleBank[scrambleIndex] || ''
+  }, [scrambleBank, scrambleIndex])
 
-    timerIntervalRef.current = setInterval(() => {
-      const elapsed = performance.now() - timerStartRef.current
-      setTimerMs(elapsed)
-    }, 10)
+  const currentAo5Number = ao5Solves.length + 1
+  const ao5Average = ao5Complete ? calculateAo5(ao5Solves) : null
+
+  function resetTimerFace() {
+    cancelAnimationFrame(rafRef.current)
+    clearTimeout(readyTimeoutRef.current)
+    pointerHoldingRef.current = false
+    startTimeRef.current = null
+    setTimerState('idle')
+    setDisplaySeconds(0)
+    setStoppedSeconds(null)
+  }
+
+  function animateTimer() {
+    if (!startTimeRef.current) return
+
+    const now = performance.now()
+    const elapsedSeconds = (now - startTimeRef.current) / 1000
+    setDisplaySeconds(elapsedSeconds)
+    rafRef.current = requestAnimationFrame(animateTimer)
+  }
+
+  function startTimer() {
+    cancelAnimationFrame(rafRef.current)
+    setStoppedSeconds(null)
+    setSolveNote('')
+    setTimerState('running')
+    startTimeRef.current = performance.now()
+    rafRef.current = requestAnimationFrame(animateTimer)
   }
 
   function stopTimer() {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
+    if (currentStateRef.current !== 'running' || !startTimeRef.current) return
 
-    const elapsed = performance.now() - timerStartRef.current
-    setTimerMs(elapsed)
-    setFinalTimerMs(elapsed)
+    cancelAnimationFrame(rafRef.current)
+
+    const elapsedSeconds = Number(
+      (((performance.now() - startTimeRef.current) / 1000)).toFixed(2)
+    )
+
+    setDisplaySeconds(elapsedSeconds)
+    setStoppedSeconds(elapsedSeconds)
+    setTimerState('stopped')
+    startTimeRef.current = null
+
+    if (activityType === 'ao5_timer') {
+      const updatedSolves = [...ao5Solves, elapsedSeconds]
+      setAo5Solves(updatedSolves)
+
+      if (updatedSolves.length === 5) {
+        setAo5Complete(true)
+        setAo5NeedsContinue(false)
+      } else {
+        setAo5NeedsContinue(true)
+      }
+    }
   }
 
-  function handlePointerDown(e) {
-    e.preventDefault()
+  function handlePressStart(event) {
+    event.preventDefault()
 
-    if (phase === 'idle') {
-      setPhase('armingStart')
-      return
-    }
-
-    if (phase === 'running') {
-      setPhase('armingStop')
-    }
-  }
-
-  function handlePointerUp(e) {
-    e.preventDefault()
-
-    if (phase === 'armingStart') {
-      setTimerMs(0)
-      setFinalTimerMs(null)
-      setPhase('running')
-      startTimer()
-      return
-    }
-
-    if (phase === 'armingStop') {
+    if (currentStateRef.current === 'running') {
       stopTimer()
-      setPhase('review')
+      return
+    }
+
+    if (activityType === 'scramble_timer' && !scrambleConfirmed) {
+      return
+    }
+
+    if (activityType === 'ao5_timer' && ao5NeedsContinue) {
+      return
+    }
+
+    if (currentStateRef.current !== 'idle') return
+
+    pointerHoldingRef.current = true
+    setTimerState('holding')
+
+    readyTimeoutRef.current = setTimeout(() => {
+      if (!pointerHoldingRef.current) return
+      setTimerState('ready')
+    }, 260)
+  }
+
+  function handlePressEnd(event) {
+    event.preventDefault()
+
+    clearTimeout(readyTimeoutRef.current)
+
+    if (!pointerHoldingRef.current) return
+    pointerHoldingRef.current = false
+
+    if (currentStateRef.current === 'ready') {
+      startTimer()
+    } else if (currentStateRef.current === 'holding') {
+      setTimerState('idle')
     }
   }
 
-  function handleContextMenu(e) {
-    e.preventDefault()
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.code !== 'Space') return
+      if (event.repeat) return
+      event.preventDefault()
+      handlePressStart(event)
+    }
+
+    function handleKeyUp(event) {
+      if (event.code !== 'Space') return
+      event.preventDefault()
+      handlePressEnd(event)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [activityType, ao5NeedsContinue, scrambleConfirmed, ao5Solves])
+
+  async function maybeCelebrateAndPrompt(savedValue) {
+    if (!compareGoalHit(savedValue, skill.goal)) return
+
+    setShowCelebration(true)
+
+    setTimeout(async () => {
+      setShowCelebration(false)
+
+      const wantsNewGoal = window.confirm(
+        'You reached or beat your goal. Do you want to set a new goal now?'
+      )
+
+      if (!wantsNewGoal) return
+
+      const nextGoal = window.prompt(
+        'Enter a new goal time (for example 11.90 or 1:02.50):',
+        skill.goal || ''
+      )
+
+      if (nextGoal === null) return
+
+      await onUpdateSkill({
+        goal: nextGoal.trim(),
+      })
+    }, 2200)
   }
 
-  function handleSave() {
-    if (finalTimerMs === null) return
+  async function saveRegularOrScrambleSolve() {
+    if (stoppedSeconds === null) return
 
-    onSaveSolve({
-      value: (finalTimerMs / 1000).toFixed(2),
-      note: note.trim(),
-      date: getTodayDate(),
+    let note = solveNote.trim()
+
+    if (activityType === 'scramble_timer' && currentScramble) {
+      note = note
+        ? `Scramble: ${currentScramble}\n\n${note}`
+        : `Scramble: ${currentScramble}`
+    }
+
+    await onSaveSolve({
+      date: formatDateInput(),
+      value: stoppedSeconds.toFixed(2),
+      note,
     })
 
-    setNote('')
-    setTimerMs(0)
-    setFinalTimerMs(null)
-    setPhase('idle')
-    onBack()
+    await maybeCelebrateAndPrompt(stoppedSeconds.toFixed(2))
+
+    if (activityType === 'scramble_timer') {
+      const nextIndex = scrambleIndex + 1
+
+      if (nextIndex >= scrambleBank.length) {
+        setScrambleBank(generateScrambleBank(100))
+        setScrambleIndex(0)
+      } else {
+        setScrambleIndex(nextIndex)
+      }
+
+      setScrambleConfirmed(false)
+    }
+
+    resetTimerFace()
   }
 
-  function handleDiscard() {
-    setNote('')
-    setTimerMs(0)
-    setFinalTimerMs(null)
-    setPhase('idle')
+  async function saveAo5Session() {
+    if (!ao5Complete || ao5Average === null) return
+
+    const noteLines = [
+      `Ao5 solves: ${ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}`,
+    ]
+
+    if (solveNote.trim()) {
+      noteLines.push('', solveNote.trim())
+    }
+
+    await onSaveSolve({
+      date: formatDateInput(),
+      value: ao5Average.toFixed(2),
+      note: noteLines.join('\n'),
+    })
+
+    await maybeCelebrateAndPrompt(ao5Average.toFixed(2))
+
+    setAo5Solves([])
+    setAo5NeedsContinue(false)
+    setAo5Complete(false)
+    setSolveNote('')
+    resetTimerFace()
   }
 
-  function getCenterText() {
-    if (phase === 'idle') return 'Hold to start'
-    if (phase === 'armingStart') return 'Release to start'
-    if (phase === 'running') return formatTimerDisplay(timerMs)
-    if (phase === 'armingStop') return formatTimerDisplay(timerMs)
-    if (phase === 'review') return formatTimerDisplay(finalTimerMs || 0)
-    return 'Hold to start'
+  function continueAo5() {
+    setAo5NeedsContinue(false)
+    setStoppedSeconds(null)
+    setDisplaySeconds(0)
+    setTimerState('idle')
   }
 
-  function getSubText() {
-    if (phase === 'idle') return skill.name
-    if (phase === 'armingStart') return 'Ready...'
-    if (phase === 'running') return 'Hold when done'
-    if (phase === 'armingStop') return 'Release to stop'
-    if (phase === 'review') return 'Solve complete'
+  function getTimerLabel() {
+    if (activityType === 'ao5_timer') {
+      if (ao5Complete) return 'Ao5 Complete'
+      return `Solve ${currentAo5Number} of 5`
+    }
+
+    if (activityType === 'scramble_timer') {
+      return 'Scramble Timer'
+    }
+
+    return 'Regular Timer'
+  }
+
+  function getTimerHelpText() {
+    if (timerState === 'holding') return 'Keep holding...'
+    if (timerState === 'ready') return 'Release to start'
+    if (timerState === 'running') return 'Tap screen or press space to stop'
+    if (timerState === 'stopped') return 'Review and save your result'
+
+    if (activityType === 'scramble_timer' && !scrambleConfirmed) {
+      return 'Choose and confirm a scramble before starting'
+    }
+
+    if (activityType === 'ao5_timer' && ao5NeedsContinue) {
+      return 'Continue when you are ready for the next solve'
+    }
+
+    return 'Hold the screen or press space, then release to start'
+  }
+
+  function getScreenStateClass() {
+    if (timerState === 'holding') return 'timer-screen-holding'
+    if (timerState === 'ready') return 'timer-screen-ready'
+    if (timerState === 'running') return 'timer-screen-running'
+    if (timerState === 'stopped') return 'timer-screen-stopped'
     return ''
   }
 
-  function getBackground() {
-    if (phase === 'armingStart') {
-      return 'linear-gradient(180deg, #4c2a03 0%, #2d1701 100%)'
-    }
-
-    if (phase === 'running') {
-      return 'linear-gradient(180deg, #050b14 0%, #02060c 100%)'
-    }
-
-    if (phase === 'armingStop') {
-      return 'linear-gradient(180deg, #2b0f0f 0%, #180808 100%)'
-    }
-
-    if (phase === 'review') {
-      return 'linear-gradient(180deg, #0e3f1f 0%, #072510 100%)'
-    }
-
-    return 'linear-gradient(180deg, #08111f 0%, #03070d 100%)'
-  }
-
-  const showTimerNumber =
-    phase === 'running' || phase === 'armingStop' || phase === 'review'
-
   return (
-    <div
-      onPointerDown={finalTimerMs === null ? handlePointerDown : undefined}
-      onPointerUp={finalTimerMs === null ? handlePointerUp : undefined}
-      onContextMenu={handleContextMenu}
-      style={{
-        minHeight: '100vh',
-        background: getBackground(),
-        color: 'white',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        WebkitTouchCallout: 'none',
-        touchAction: 'none',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: '18px',
-          left: '18px',
-          zIndex: 5,
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            border: 'none',
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.08)',
-            color: 'white',
-            padding: '10px 14px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-          }}
-        >
+    <div className="timer-page-shell">
+      {showCelebration ? <CelebrationOverlay /> : null}
+
+      <div className="timer-page-topbar">
+        <button type="button" className="timer-back-button" onClick={onBack}>
           ← Back
         </button>
+
+        <div className="timer-top-pill">{activityLabel}</div>
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px',
-          textAlign: 'center',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          WebkitTouchCallout: 'none',
-        }}
-      >
-        <div>
-          <p
-            style={{
-              margin: 0,
-              color: 'rgba(255,255,255,0.7)',
-              fontSize: '14px',
-              fontWeight: 800,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Rubik&apos;s Timer
-          </p>
-
-          <div
-            style={{
-              marginTop: '18px',
-              fontSize: showTimerNumber ? '84px' : '42px',
-              lineHeight: 1,
-              fontWeight: 900,
-              letterSpacing: '-0.05em',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-            }}
-          >
-            {getCenterText()}
-          </div>
-
-          <p
-            style={{
-              margin: '16px 0 0 0',
-              color: 'rgba(255,255,255,0.78)',
-              fontSize: '18px',
-              fontWeight: 700,
-            }}
-          >
-            {getSubText()}
+      <div className="timer-page-body">
+        <div className="timer-info-card">
+          <h1 className="timer-info-title">{skill.name}</h1>
+          <p className="timer-info-text">
+            PB: {skill.pb ? formatSolveTime(skill.pb) : 'No PB yet'} • Goal:{' '}
+            {skill.goal ? formatSolveTime(skill.goal) : 'Not set'}
           </p>
         </div>
-      </div>
 
-      {phase === 'review' && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '18px',
-            zIndex: 10,
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '420px',
-              borderRadius: '22px',
-              border: '1px solid rgba(255,255,255,0.08)',
-              background:
-                'linear-gradient(145deg, rgba(13, 20, 36, 0.98), rgba(9, 14, 25, 0.95))',
-              boxShadow: '0 18px 60px rgba(0,0,0,0.28)',
-              padding: '18px',
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '24px',
-                letterSpacing: '-0.03em',
-              }}
-            >
-              Add Solve
-            </h2>
-
-            <p
-              style={{
-                margin: '8px 0 0 0',
-                color: '#9fb0c7',
-                lineHeight: 1.45,
-              }}
-            >
-              Your time is locked. Add notes if you want, then save or discard.
+        <div className="mini-grid">
+          <div className="mini-card">
+            <p className="mini-card-label">PB</p>
+            <p className="mini-card-value">
+              {skill.pb ? formatSolveTime(skill.pb) : '—'}
             </p>
+          </div>
 
-            <div style={{ marginTop: '16px' }}>
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: '6px',
-                  color: '#94a3b8',
-                  fontSize: '14px',
-                  fontWeight: 700,
-                }}
-              >
-                Solve Time
-              </label>
+          <div className="mini-card">
+            <p className="mini-card-label">Goal</p>
+            <p className="mini-card-value">
+              {skill.goal ? formatSolveTime(skill.goal) : '—'}
+            </p>
+          </div>
 
-              <div
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  borderRadius: '14px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'rgba(30,41,59,0.9)',
-                  color: 'white',
-                  padding: '13px 14px',
-                  fontWeight: 800,
-                  fontSize: '18px',
-                }}
-              >
-                {formatTimerDisplay(finalTimerMs || 0)} sec
-              </div>
-            </div>
-
-            <div style={{ marginTop: '12px' }}>
-              <label
-                style={{
-                  display: 'block',
-                  marginBottom: '6px',
-                  color: '#94a3b8',
-                  fontSize: '14px',
-                  fontWeight: 700,
-                }}
-              >
-                Notes
-              </label>
-
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows="3"
-                placeholder="Add solve notes if you want"
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  borderRadius: '14px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'rgba(30,41,59,0.9)',
-                  color: 'white',
-                  padding: '13px 14px',
-                  resize: 'vertical',
-                }}
-              />
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '10px',
-                marginTop: '16px',
-              }}
-            >
-              <button
-                type="button"
-                onClick={handleSave}
-                style={{
-                  border: 'none',
-                  borderRadius: '16px',
-                  padding: '14px 16px',
-                  background: 'linear-gradient(135deg, #22d3ee 0%, #38bdf8 100%)',
-                  color: '#07101d',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                Add Solve
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDiscard}
-                style={{
-                  border: 'none',
-                  borderRadius: '16px',
-                  padding: '14px 16px',
-                  background: 'rgba(255,255,255,0.08)',
-                  color: 'white',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                Discard
-              </button>
-            </div>
+          <div className="mini-card">
+            <p className="mini-card-label">History</p>
+            <p className="mini-card-value">{skill.progress.length}</p>
           </div>
         </div>
-      )}
+
+        <div
+          className={`timer-screen ${getScreenStateClass()}`}
+          role="button"
+          tabIndex={0}
+          onMouseDown={handlePressStart}
+          onMouseUp={handlePressEnd}
+          onMouseLeave={handlePressEnd}
+          onTouchStart={handlePressStart}
+          onTouchEnd={handlePressEnd}
+          onTouchCancel={handlePressEnd}
+        >
+          <div className="timer-label">{getTimerLabel()}</div>
+          <div className="timer-value">
+            {formatSolveTime(
+              timerState === 'stopped' ? stoppedSeconds : displaySeconds
+            )}
+          </div>
+          <div className="timer-help">{getTimerHelpText()}</div>
+        </div>
+
+        <div className="timer-bottom-card">
+          {activityType === 'scramble_timer' && !scrambleConfirmed ? (
+            <>
+              <h3 className="panel-title">Scramble Bank</h3>
+              <div className="scramble-bank">
+                {scrambleBank.slice(scrambleIndex, scrambleIndex + 8).map((scramble, index) => {
+                  const actualIndex = scrambleIndex + index
+                  const isActive = actualIndex === scrambleIndex
+
+                  return (
+                    <button
+                      key={`${scramble}-${actualIndex}`}
+                      type="button"
+                      className={`scramble-card ${isActive ? 'active' : ''}`}
+                      onClick={() => setScrambleIndex(actualIndex)}
+                    >
+                      <p className="scramble-index">Scramble {actualIndex + 1}</p>
+                      <p className="scramble-text">{scramble}</p>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="timer-action-row" style={{ marginTop: '12px' }}>
+                <button
+                  type="button"
+                  className="timer-action-button"
+                  onClick={() => setScrambleConfirmed(true)}
+                >
+                  Use This Scramble
+                </button>
+
+                <button
+                  type="button"
+                  className="timer-secondary-button"
+                  onClick={() => setScrambleBank(generateScrambleBank(100))}
+                >
+                  Regenerate Bank
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {activityType === 'scramble_timer' && scrambleConfirmed ? (
+            <>
+              <h3 className="panel-title">Current Scramble</h3>
+              <p className="scramble-text">{currentScramble}</p>
+
+              {timerState === 'stopped' ? (
+                <>
+                  <div className="field-group" style={{ marginTop: '14px' }}>
+                    <label className="field-label">Solve Note (optional)</label>
+                    <textarea
+                      value={solveNote}
+                      onChange={(e) => setSolveNote(e.target.value)}
+                      rows="4"
+                      className="app-input app-textarea"
+                      placeholder="Add quick thoughts on the solve"
+                    />
+                  </div>
+
+                  <div className="timer-action-row">
+                    <button
+                      type="button"
+                      className="timer-action-button"
+                      onClick={saveRegularOrScrambleSolve}
+                    >
+                      Save Solve
+                    </button>
+
+                    <button
+                      type="button"
+                      className="timer-secondary-button"
+                      onClick={resetTimerFace}
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : null}
+
+          {activityType === 'regular_timer' ? (
+            <>
+              <h3 className="panel-title">Regular Solve</h3>
+              <p className="timer-info-text">
+                Standard timer flow. Record the time, then optionally attach a note.
+              </p>
+
+              {timerState === 'stopped' ? (
+                <>
+                  <div className="field-group" style={{ marginTop: '14px' }}>
+                    <label className="field-label">Solve Note (optional)</label>
+                    <textarea
+                      value={solveNote}
+                      onChange={(e) => setSolveNote(e.target.value)}
+                      rows="4"
+                      className="app-input app-textarea"
+                      placeholder="What happened on this solve?"
+                    />
+                  </div>
+
+                  <div className="timer-action-row">
+                    <button
+                      type="button"
+                      className="timer-action-button"
+                      onClick={saveRegularOrScrambleSolve}
+                    >
+                      Save Solve
+                    </button>
+
+                    <button
+                      type="button"
+                      className="timer-secondary-button"
+                      onClick={resetTimerFace}
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : null}
+
+          {activityType === 'ao5_timer' ? (
+            <>
+              <h3 className="panel-title">Ao5 Session</h3>
+              <p className="timer-info-text">
+                Complete five solves in sequence. The saved result uses the middle
+                three solves as the average.
+              </p>
+
+              <div className="ao5-splits">
+                {Array.from({ length: 5 }).map((_, index) => {
+                  const solve = ao5Solves[index]
+
+                  return (
+                    <div key={index} className="ao5-split-row">
+                      <strong>Solve {index + 1}</strong>
+                      <span>{solve ? formatSolveTime(solve) : 'Pending'}</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {ao5NeedsContinue ? (
+                <div className="timer-action-row" style={{ marginTop: '14px' }}>
+                  <button
+                    type="button"
+                    className="timer-action-button"
+                    onClick={continueAo5}
+                  >
+                    Continue to Solve {currentAo5Number}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="timer-secondary-button"
+                    onClick={() => {
+                      setAo5Solves([])
+                      setAo5NeedsContinue(false)
+                      setAo5Complete(false)
+                      resetTimerFace()
+                    }}
+                  >
+                    Reset Session
+                  </button>
+                </div>
+              ) : null}
+
+              {ao5Complete ? (
+                <>
+                  <div className="field-group" style={{ marginTop: '14px' }}>
+                    <label className="field-label">Ao5 Note (optional)</label>
+                    <textarea
+                      value={solveNote}
+                      onChange={(e) => setSolveNote(e.target.value)}
+                      rows="4"
+                      className="app-input app-textarea"
+                      placeholder="Add notes about the whole session"
+                    />
+                  </div>
+
+                  <div className="mini-card" style={{ marginTop: '12px' }}>
+                    <p className="mini-card-label">Calculated Ao5</p>
+                    <p className="mini-card-value">
+                      {ao5Average !== null ? formatSolveTime(ao5Average) : '—'}
+                    </p>
+                  </div>
+
+                  <div className="timer-action-row" style={{ marginTop: '12px' }}>
+                    <button
+                      type="button"
+                      className="timer-action-button"
+                      onClick={saveAo5Session}
+                    >
+                      Save Ao5 Result
+                    </button>
+
+                    <button
+                      type="button"
+                      className="timer-secondary-button"
+                      onClick={() => {
+                        setAo5Solves([])
+                        setAo5NeedsContinue(false)
+                        setAo5Complete(false)
+                        resetTimerFace()
+                      }}
+                    >
+                      Start Fresh
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

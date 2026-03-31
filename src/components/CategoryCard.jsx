@@ -15,7 +15,7 @@ export default function CategoryCard({
           alt={category.name}
           style={{
             width: '100%',
-            height: '160px',
+            height: '170px',
             objectFit: 'cover',
             display: 'block',
           }}
@@ -25,11 +25,13 @@ export default function CategoryCard({
           <div className="category-heading-row">
             <h2 className="category-title">{category.name}</h2>
             <span className="category-badge">
-              {skillCount} skill{skillCount === 1 ? '' : 's'}
+              {skillCount} activit{skillCount === 1 ? 'y' : 'ies'}
             </span>
           </div>
 
-          <p className="category-caption">Tap to open this category</p>
+          <p className="category-caption">
+            Open this folder to launch training activities.
+          </p>
         </div>
       </button>
 

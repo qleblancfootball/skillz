@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import CategoryPage from './pages/CategoryPage'
@@ -22,6 +22,53 @@ import {
   deleteAllSkills,
   deleteAllProgressEntries,
 } from './lib/db'
+import {
+  formatDateInput,
+  formatSolveTime,
+  normalizeStoredTime,
+  parseTimeToSeconds,
+} from './lib/rubiks'
+
+function stripUndefinedValues(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  )
+}
+
+function getDefaultActivityConfig(templateType) {
+  switch (templateType) {
+    case 'scramble_timer':
+      return {
+        name: 'Scramble + Timer',
+        unit: 'sec',
+        valueLabel: 'Solve Time',
+        pbLabel: 'PB',
+        higherIsBetter: false,
+        notes: 'Generated 3x3 scrambles with timer tracking.',
+      }
+
+    case 'ao5_timer':
+      return {
+        name: 'Average of 5',
+        unit: 'sec',
+        valueLabel: 'Ao5 Result',
+        pbLabel: 'Best Ao5',
+        higherIsBetter: false,
+        notes: 'Five-solve average session tracker.',
+      }
+
+    case 'regular_timer':
+    default:
+      return {
+        name: 'Regular Timer',
+        unit: 'sec',
+        valueLabel: 'Solve Time',
+        pbLabel: 'PB',
+        higherIsBetter: false,
+        notes: 'Standard hold-and-release solve timer.',
+      }
+  }
+}
 
 export default function App() {
   const [authReady, setAuthReady] = useState(false)
@@ -46,6 +93,7 @@ export default function App() {
       try {
         const { data, error } = await supabase.auth.getUser()
         if (error) throw error
+
         if (!mounted) return
         setCurrentUser(data.user ?? null)
       } catch (err) {
@@ -62,20 +110,22 @@ export default function App() {
 
     initAuth()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const nextUser = session?.user ?? null
-      setCurrentUser(nextUser)
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const nextUser = session?.user ?? null
+        setCurrentUser(nextUser)
 
-      if (!nextUser) {
-        setCategories([])
-        setSkillsRaw([])
-        setProgressEntries([])
-        setSelectedCategoryId(null)
-        setSelectedSkillId(null)
-        setCurrentView('home')
-        setLoading(false)
+        if (!nextUser) {
+          setCategories([])
+          setSkillsRaw([])
+          setProgressEntries([])
+          setSelectedCategoryId(null)
+          setSelectedSkillId(null)
+          setCurrentView('home')
+          setLoading(false)
+        }
       }
-    })
+    )
 
     return () => {
       mounted = false
@@ -118,7 +168,7 @@ export default function App() {
           id: entry.id,
           date: entry.entry_date,
           value: entry.value,
-          note: entry.note,
+          note: entry.note || '',
         }))
 
       return {
@@ -127,31 +177,31 @@ export default function App() {
         name: skill.name,
         pb: skill.pb,
         ranking: skill.ranking,
-        unit: skill.unit,
-        valueLabel: skill.value_label,
-        pbLabel: skill.pb_label,
-        higherIsBetter: skill.higher_is_better,
-        image: skill.image,
-        notes: skill.notes,
+        unit: skill.unit || 'sec',
+        valueLabel: skill.value_label || 'Solve Time',
+        pbLabel: skill.pb_label || 'PB',
+        higherIsBetter: skill.higher_is_better ?? false,
+        image: skill.image || '',
+        notes: skill.notes || '',
         lastUpdated: skill.last_updated,
         progress,
-        templateType: skill.template_type,
-        isPresetLocked: skill.is_preset_locked,
+        templateType: skill.template_type || 'regular_timer',
+        isPresetLocked: skill.is_preset_locked ?? true,
         goal: skill.goal ?? '',
       }
     })
   }, [skillsRaw, progressEntries])
 
   const selectedCategory = useMemo(() => {
-    return categories.find((c) => c.id === selectedCategoryId)
+    return categories.find((category) => category.id === selectedCategoryId) || null
   }, [categories, selectedCategoryId])
 
   const selectedSkill = useMemo(() => {
-    return skills.find((s) => s.id === selectedSkillId)
+    return skills.find((skill) => skill.id === selectedSkillId) || null
   }, [skills, selectedSkillId])
 
   const categorySkills = useMemo(() => {
-    return skills.filter((s) => s.categoryId === selectedCategoryId)
+    return skills.filter((skill) => skill.categoryId === selectedCategoryId)
   }, [skills, selectedCategoryId])
 
   function openCategory(categoryId) {
@@ -183,53 +233,33 @@ export default function App() {
     setCurrentView('skill')
   }
 
-  function cleanEntryValue(rawValue, unit) {
-    if (!rawValue) return ''
-
-    let cleaned = rawValue.trim()
-
-    if (unit) {
-      const escapedUnit = unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const unitRegex = new RegExp(`\\s*${escapedUnit}\\s*$`, 'i')
-      cleaned = cleaned.replace(unitRegex, '')
-    }
-
-    return cleaned.trim()
-  }
-
   function getRecalculatedPb(skill, progressList) {
-    if (skill.templateType === 'spanish_vocab') {
-      return String(progressList.length)
-    }
-
     const numericEntries = progressList
       .map((entry) => ({
         raw: entry.value,
-        num: parseFloat(entry.value),
+        seconds: parseTimeToSeconds(entry.value),
       }))
-      .filter((entry) => !Number.isNaN(entry.num))
+      .filter((entry) => entry.seconds !== null)
 
     if (numericEntries.length === 0) {
-      return skill.pb || ''
-    }
-
-    if (skill.higherIsBetter === false) {
-      let best = numericEntries[0]
-      for (let i = 1; i < numericEntries.length; i++) {
-        if (numericEntries[i].num < best.num) {
-          best = numericEntries[i]
-        }
-      }
-      return best.raw
+      return ''
     }
 
     let best = numericEntries[0]
-    for (let i = 1; i < numericEntries.length; i++) {
-      if (numericEntries[i].num > best.num) {
-        best = numericEntries[i]
+
+    for (let i = 1; i < numericEntries.length; i += 1) {
+      const current = numericEntries[i]
+
+      if (skill.higherIsBetter) {
+        if (current.seconds > best.seconds) {
+          best = current
+        }
+      } else if (current.seconds < best.seconds) {
+        best = current
       }
     }
-    return best.raw
+
+    return normalizeStoredTime(best.raw)
   }
 
   async function addSkillEntry(skillId, entryData) {
@@ -237,20 +267,23 @@ export default function App() {
       setSaving(true)
       setError('')
 
-      const skill = skills.find((s) => s.id === skillId)
+      const skill = skills.find((item) => item.id === skillId)
       if (!skill || !currentUser) return
 
-      const cleanedValue =
-        skill.templateType === 'spanish_vocab'
-          ? entryData.value.trim()
-          : cleanEntryValue(entryData.value, skill.unit)
+      const normalizedValue = normalizeStoredTime(entryData.value)
+      if (!normalizedValue) {
+        throw new Error('Invalid solve time.')
+      }
+
+      const today = entryData.date || formatDateInput(new Date())
+      const note = (entryData.note || '').trim()
 
       const newProgress = [
         {
-          id: 'temp',
-          date: entryData.date,
-          value: cleanedValue,
-          note: entryData.note,
+          id: `temp-${Date.now()}`,
+          date: today,
+          value: normalizedValue,
+          note,
         },
         ...skill.progress,
       ]
@@ -260,22 +293,25 @@ export default function App() {
       await createProgressEntry(
         {
           skill_id: skillId,
-          entry_date: entryData.date,
-          value: cleanedValue,
-          note: entryData.note,
+          entry_date: today,
+          value: normalizedValue,
+          note,
         },
         currentUser.id
       )
 
-      await updateSkillRow(skillId, {
-        pb: newPb,
-        last_updated: entryData.date,
-      })
+      await updateSkillRow(
+        skillId,
+        stripUndefinedValues({
+          pb: newPb,
+          last_updated: today,
+        })
+      )
 
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to add entry.')
+      setError(err.message || 'Failed to save solve.')
     } finally {
       setSaving(false)
     }
@@ -286,17 +322,26 @@ export default function App() {
       setSaving(true)
       setError('')
 
-      await updateSkillRow(skillId, {
-        notes: updates.notes,
-        ranking: updates.ranking,
-        image: updates.image,
-        goal: updates.goal ?? '',
-      })
+      const existingSkill = skills.find((item) => item.id === skillId)
+      if (!existingSkill) return
+
+      await updateSkillRow(
+        skillId,
+        stripUndefinedValues({
+          name: updates.name,
+          notes: updates.notes,
+          image: updates.image,
+          goal: updates.goal,
+          ranking: updates.ranking,
+          value_label: updates.valueLabel,
+          pb_label: updates.pbLabel,
+        })
+      )
 
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to update skill.')
+      setError(err.message || 'Failed to update activity.')
     } finally {
       setSaving(false)
     }
@@ -313,7 +358,7 @@ export default function App() {
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to delete skill.')
+      setError(err.message || 'Failed to delete activity.')
     } finally {
       setSaving(false)
     }
@@ -324,41 +369,20 @@ export default function App() {
       setSaving(true)
       setError('')
 
-      const skill = skills.find((s) => s.id === skillId)
+      const skill = skills.find((item) => item.id === skillId)
       if (!skill) return
 
-      const cleanedValue =
-        skill.templateType === 'spanish_vocab'
-          ? updatedEntry.value.trim()
-          : cleanEntryValue(updatedEntry.value, skill.unit)
-
-      const updatedProgress = skill.progress.map((entry) => {
-        if (entry.id !== entryId) return entry
-        return {
-          ...entry,
-          date: updatedEntry.date,
-          value: cleanedValue,
-          note: updatedEntry.note,
-        }
-      })
-
-      const newPb = getRecalculatedPb(skill, updatedProgress)
+      const existingEntry = skill.progress.find((entry) => entry.id === entryId)
+      if (!existingEntry) return
 
       await updateProgressEntryRow(entryId, {
-        entry_date: updatedEntry.date,
-        value: cleanedValue,
-        note: updatedEntry.note,
-      })
-
-      await updateSkillRow(skillId, {
-        pb: newPb,
-        last_updated: updatedEntry.date,
+        note: (updatedEntry.note || '').trim(),
       })
 
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to update progress entry.')
+      setError(err.message || 'Failed to update solve note.')
     } finally {
       setSaving(false)
     }
@@ -369,7 +393,7 @@ export default function App() {
       setSaving(true)
       setError('')
 
-      const skill = skills.find((s) => s.id === skillId)
+      const skill = skills.find((item) => item.id === skillId)
       if (!skill) return
 
       const updatedProgress = skill.progress.filter((entry) => entry.id !== entryId)
@@ -378,113 +402,20 @@ export default function App() {
 
       await deleteProgressEntryRow(entryId)
 
-      await updateSkillRow(skillId, {
-        pb: newPb,
-        last_updated: newLastUpdated,
-      })
-
-      await loadAppData()
-    } catch (err) {
-      console.error(err)
-      setError(err.message || 'Failed to delete progress entry.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function addNewSkill(newSkill) {
-    try {
-      setSaving(true)
-      setError('')
-
-      if (!currentUser) return
-
-      await createSkill(
-        {
-          category_id: newSkill.categoryId,
-          name: newSkill.name,
-          pb: newSkill.pb || '',
-          ranking: newSkill.ranking || '',
-          unit: newSkill.unit || '',
-          value_label: newSkill.valueLabel || 'Value',
-          pb_label: newSkill.pbLabel || 'PB',
-          higher_is_better: newSkill.higherIsBetter,
-          image: newSkill.image || '',
-          notes: newSkill.notes || '',
-          last_updated: newSkill.lastUpdated || null,
-          template_type: newSkill.templateType || '',
-          is_preset_locked: !!newSkill.isPresetLocked,
-          goal: newSkill.goal || '',
-        },
-        currentUser.id
+      await updateSkillRow(
+        skillId,
+        stripUndefinedValues({
+          pb: newPb,
+          last_updated: newLastUpdated,
+        })
       )
 
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to create skill.')
+      setError(err.message || 'Failed to delete solve.')
     } finally {
       setSaving(false)
-    }
-  }
-
-  function addPresetSkill(categoryId, presetKey) {
-    if (presetKey === 'rubiks_timer') {
-      const alreadyExists = skills.some(
-        (skill) =>
-          skill.categoryId === categoryId && skill.templateType === 'rubiks_timer'
-      )
-
-      if (alreadyExists) {
-        window.alert("Rubik's Solving already exists in this category.")
-        return
-      }
-
-      addNewSkill({
-        categoryId,
-        name: "Rubik's Solving",
-        pb: '',
-        ranking: '—',
-        unit: 'sec',
-        valueLabel: 'Solve Time',
-        pbLabel: 'Best Solve',
-        higherIsBetter: false,
-        image: '',
-        notes: "Preset timer skill for Rubik's solves.",
-        lastUpdated: new Date().toISOString().split('T')[0],
-        templateType: 'rubiks_timer',
-        isPresetLocked: true,
-        goal: '',
-      })
-    }
-
-    if (presetKey === 'spanish_vocab') {
-      const alreadyExists = skills.some(
-        (skill) =>
-          skill.categoryId === categoryId && skill.templateType === 'spanish_vocab'
-      )
-
-      if (alreadyExists) {
-        window.alert('Spanish Vocabulary already exists in this category.')
-        return
-      }
-
-      addNewSkill({
-        categoryId,
-        name: 'Spanish Vocabulary',
-        pb: '0',
-        ranking: '—',
-        unit: 'words',
-        valueLabel: 'Spanish Word',
-        pbLabel: 'Words Learned',
-        higherIsBetter: true,
-        image: '',
-        notes: 'Tap a card to flip between Spanish and English.',
-        lastUpdated: new Date().toISOString().split('T')[0],
-        templateType: 'spanish_vocab',
-        isPresetLocked: true,
-        goal: '',
-      })
     }
   }
 
@@ -497,8 +428,8 @@ export default function App() {
 
       await createCategory(
         {
-          name: newCategory.name,
-          image: newCategory.image || '',
+          name: newCategory.name.trim(),
+          image: (newCategory.image || '').trim(),
         },
         currentUser.id
       )
@@ -506,7 +437,7 @@ export default function App() {
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to create category.')
+      setError(err.message || 'Failed to create folder.')
     } finally {
       setSaving(false)
     }
@@ -517,15 +448,18 @@ export default function App() {
       setSaving(true)
       setError('')
 
-      await updateCategoryRow(categoryId, {
-        name: updates.name,
-        image: updates.image || '',
-      })
+      await updateCategoryRow(
+        categoryId,
+        stripUndefinedValues({
+          name: updates.name?.trim(),
+          image: updates.image?.trim() || '',
+        })
+      )
 
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to update category.')
+      setError(err.message || 'Failed to update folder.')
     } finally {
       setSaving(false)
     }
@@ -536,7 +470,7 @@ export default function App() {
     const categorySkillsToDelete = skills.filter((skill) => skill.categoryId === categoryId)
 
     const confirmed = window.confirm(
-      `Delete "${categoryToDelete?.name || 'this category'}"? This will also delete ${categorySkillsToDelete.length} skill(s) inside it.`
+      `Delete "${categoryToDelete?.name || 'this folder'}"? This will also delete ${categorySkillsToDelete.length} activit${categorySkillsToDelete.length === 1 ? 'y' : 'ies'}.`
     )
 
     if (!confirmed) return
@@ -556,14 +490,83 @@ export default function App() {
       await loadAppData()
     } catch (err) {
       console.error(err)
-      setError(err.message || 'Failed to delete category.')
+      setError(err.message || 'Failed to delete folder.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function addPresetSkill(categoryId, templateType, overrides = {}) {
+    const alreadyExists = skills.some(
+      (skill) =>
+        skill.categoryId === categoryId &&
+        skill.templateType === templateType &&
+        skill.name.toLowerCase() === (overrides.name || getDefaultActivityConfig(templateType).name).toLowerCase()
+    )
+
+    if (alreadyExists) {
+      window.alert('An activity with that type and name already exists in this folder.')
+      return
+    }
+
+    const defaults = getDefaultActivityConfig(templateType)
+
+    addNewSkill({
+      categoryId,
+      name: overrides.name?.trim() || defaults.name,
+      pb: '',
+      ranking: '',
+      unit: defaults.unit,
+      valueLabel: defaults.valueLabel,
+      pbLabel: defaults.pbLabel,
+      higherIsBetter: defaults.higherIsBetter,
+      image: overrides.image?.trim() || '',
+      notes: overrides.notes?.trim() || defaults.notes,
+      goal: overrides.goal?.trim() || '',
+      lastUpdated: null,
+      templateType,
+      isPresetLocked: true,
+    })
+  }
+
+  async function addNewSkill(newSkill) {
+    try {
+      setSaving(true)
+      setError('')
+
+      if (!currentUser) return
+
+      await createSkill(
+        {
+          category_id: newSkill.categoryId,
+          name: newSkill.name,
+          pb: newSkill.pb || '',
+          ranking: newSkill.ranking || '',
+          unit: newSkill.unit || 'sec',
+          value_label: newSkill.valueLabel || 'Solve Time',
+          pb_label: newSkill.pbLabel || 'PB',
+          higher_is_better: newSkill.higherIsBetter ?? false,
+          image: newSkill.image || '',
+          notes: newSkill.notes || '',
+          last_updated: newSkill.lastUpdated || null,
+          template_type: newSkill.templateType || 'regular_timer',
+          is_preset_locked: !!newSkill.isPresetLocked,
+          goal: newSkill.goal || '',
+        },
+        currentUser.id
+      )
+
+      await loadAppData()
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Failed to create activity.')
     } finally {
       setSaving(false)
     }
   }
 
   async function resetAppData() {
-    const confirmed = window.confirm('Delete all your app data?')
+    const confirmed = window.confirm('Delete all Q Rubix data?')
     if (!confirmed) return
 
     try {
@@ -604,58 +607,17 @@ export default function App() {
     return (
       <>
         {error ? (
-          <div
-            style={{
-              position: 'fixed',
-              top: 12,
-              left: 12,
-              right: 12,
-              zIndex: 9999,
-              background: '#7f1d1d',
-              color: 'white',
-              padding: '10px 12px',
-              borderRadius: '10px',
-            }}
-          >
-            {error}
-          </div>
+          <div className="floating-banner floating-banner-error">{error}</div>
         ) : null}
 
         {saving ? (
-          <div
-            style={{
-              position: 'fixed',
-              bottom: 12,
-              right: 12,
-              zIndex: 9999,
-              background: '#0f172a',
-              color: 'white',
-              padding: '10px 12px',
-              borderRadius: '10px',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            Saving...
-          </div>
+          <div className="floating-banner floating-banner-saving">Saving...</div>
         ) : null}
 
         <button
           type="button"
           onClick={handleSignOut}
-          style={{
-            position: 'fixed',
-            top: 12,
-            right: 12,
-            zIndex: 9999,
-            border: 'none',
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.08)',
-            color: 'white',
-            padding: '10px 14px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            backdropFilter: 'blur(8px)',
-          }}
+          className="floating-signout"
         >
           Sign out
         </button>
@@ -665,16 +627,7 @@ export default function App() {
 
   if (!authReady) {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: '#0b1220',
-          color: 'white',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
+      <div className="loading-screen">
         Checking auth...
       </div>
     )
@@ -686,17 +639,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          background: '#0b1220',
-          color: 'white',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        Loading your data...
+      <div className="loading-screen">
+        Loading your cube data...
       </div>
     )
   }
@@ -727,7 +671,6 @@ export default function App() {
           skills={categorySkills}
           onBack={goHome}
           onOpenSkill={openSkill}
-          onAddNewSkill={addNewSkill}
           onAddPresetSkill={addPresetSkill}
         />
       </>
@@ -741,7 +684,6 @@ export default function App() {
         <SkillPage
           skill={selectedSkill}
           onBack={goToCategory}
-          onAddEntry={addSkillEntry}
           onUpdateSkill={updateSkill}
           onDeleteSkill={deleteSkill}
           onUpdateSkillEntry={updateSkillEntry}
@@ -760,6 +702,7 @@ export default function App() {
           skill={selectedSkill}
           onBack={goToSkill}
           onSaveSolve={(solveData) => addSkillEntry(selectedSkill.id, solveData)}
+          onUpdateSkill={(updates) => updateSkill(selectedSkill.id, updates)}
         />
       </>
     )

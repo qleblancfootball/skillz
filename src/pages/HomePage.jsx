@@ -12,18 +12,26 @@ export default function HomePage({
   onDeleteCategory,
 }) {
   const [search, setSearch] = useState('')
-  const [showCreateForm, setShowCreateForm] = useState(false)
-
-  const [newName, setNewName] = useState('')
-  const [newImage, setNewImage] = useState('')
-
-  const [editingCategoryId, setEditingCategoryId] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName] = useState('')
+  const [image, setImage] = useState('')
+  const [editingId, setEditingId] = useState(null)
   const [editName, setEditName] = useState('')
   const [editImage, setEditImage] = useState('')
 
+  const categorySkillCounts = useMemo(() => {
+    return categories.reduce((acc, category) => {
+      acc[category.id] = skills.filter((skill) => skill.categoryId === category.id).length
+      return acc
+    }, {})
+  }, [categories, skills])
+
+  const totalSolveEntries = useMemo(() => {
+    return skills.reduce((sum, skill) => sum + skill.progress.length, 0)
+  }, [skills])
+
   const filteredCategories = useMemo(() => {
     const term = search.trim().toLowerCase()
-
     if (!term) return categories
 
     return categories.filter((category) =>
@@ -31,38 +39,33 @@ export default function HomePage({
     )
   }, [categories, search])
 
-  function getSkillCount(categoryId) {
-    return skills.filter((skill) => skill.categoryId === categoryId).length
-  }
-
-  function handleCreateCategory(e) {
+  function handleCreateFolder(e) {
     e.preventDefault()
-
-    if (!newName.trim()) return
+    if (!name.trim()) return
 
     onAddNewCategory({
-      name: newName.trim(),
-      image: newImage.trim(),
+      name: name.trim(),
+      image: image.trim(),
     })
 
-    setNewName('')
-    setNewImage('')
-    setShowCreateForm(false)
+    setName('')
+    setImage('')
+    setShowForm(false)
   }
 
-  function startEditCategory(category) {
-    setEditingCategoryId(category.id)
+  function startEdit(category) {
+    setEditingId(category.id)
     setEditName(category.name)
     setEditImage(category.image || '')
   }
 
-  function cancelEditCategory() {
-    setEditingCategoryId(null)
+  function cancelEdit() {
+    setEditingId(null)
     setEditName('')
     setEditImage('')
   }
 
-  function saveEditCategory(categoryId) {
+  function saveEdit(categoryId) {
     if (!editName.trim()) return
 
     onUpdateCategory(categoryId, {
@@ -70,32 +73,51 @@ export default function HomePage({
       image: editImage.trim(),
     })
 
-    cancelEditCategory()
+    cancelEdit()
   }
 
   return (
     <Layout
-      title="Skill Tracker"
-      subtitle="Build categories, track progress, keep it clean."
+      title="Q Rubix"
+      subtitle="Build folders, track solves, chase PBs, and train like a speedcuber."
     >
       <div className="hero-card">
         <div>
-          <p className="hero-eyebrow">Home Base</p>
-          <h2 className="hero-title">Your categories</h2>
+          <p className="hero-eyebrow">Cube Training Tracker</p>
+          <h2 className="hero-title">Modern practice folders for your Rubik’s progress.</h2>
           <p className="hero-text">
-            Keep all your skills organized and easy to reach.
+            Create folders for sessions, events, or cube types. Inside each one,
+            add focused timer activities and keep your solve history clean.
           </p>
         </div>
 
         <div className="hero-stats">
           <div className="stat-pill">
-            <span className="stat-label">Categories</span>
+            <span className="stat-label">Folders</span>
             <span className="stat-value">{categories.length}</span>
           </div>
+
           <div className="stat-pill">
-            <span className="stat-label">Skills</span>
+            <span className="stat-label">Activities</span>
             <span className="stat-value">{skills.length}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="stat-grid">
+        <div className="stat-card">
+          <p className="stat-card-label">Folders</p>
+          <p className="stat-card-value">{categories.length}</p>
+        </div>
+
+        <div className="stat-card">
+          <p className="stat-card-label">Activities</p>
+          <p className="stat-card-value">{skills.length}</p>
+        </div>
+
+        <div className="stat-card">
+          <p className="stat-card-label">Saved Solves</p>
+          <p className="stat-card-value">{totalSolveEntries}</p>
         </div>
       </div>
 
@@ -103,17 +125,13 @@ export default function HomePage({
         <button
           type="button"
           className="primary-button"
-          onClick={() => setShowCreateForm((prev) => !prev)}
+          onClick={() => setShowForm((prev) => !prev)}
         >
-          {showCreateForm ? 'Close New Category' : '+ New Category'}
+          {showForm ? 'Close Folder Form' : '+ New Folder'}
         </button>
 
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={onResetSkills}
-        >
-          Reset App Data
+        <button type="button" className="secondary-button" onClick={onResetSkills}>
+          Reset all app data
         </button>
       </div>
 
@@ -121,37 +139,37 @@ export default function HomePage({
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search categories..."
+          placeholder="Search folders..."
           className="app-input"
         />
       </div>
 
-      {showCreateForm && (
-        <form onSubmit={handleCreateCategory} className="panel-card">
-          <h3 className="panel-title">Create Category</h3>
+      {showForm && (
+        <form onSubmit={handleCreateFolder} className="panel-card">
+          <h3 className="panel-title">Create Folder</h3>
 
           <div className="field-group">
-            <label className="field-label">Category Name</label>
+            <label className="field-label">Folder Name</label>
             <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Example: Athletics"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               className="app-input"
+              placeholder="Example: 3x3 Main / Summer Grind / One-Handed"
             />
           </div>
 
           <div className="field-group">
-            <label className="field-label">Image URL</label>
+            <label className="field-label">Cover Image URL (optional)</label>
             <input
-              value={newImage}
-              onChange={(e) => setNewImage(e.target.value)}
-              placeholder="Paste image URL"
+              value={image}
+              onChange={(e) => setImage(e.target.value)}
               className="app-input"
+              placeholder="Paste image URL"
             />
           </div>
 
           <button type="submit" className="primary-button full-width">
-            Save Category
+            Save Folder
           </button>
         </form>
       )}
@@ -159,29 +177,32 @@ export default function HomePage({
       <div className="stack-list">
         {filteredCategories.length === 0 ? (
           <div className="empty-card">
-            <p className="empty-title">No categories found</p>
-            <p className="empty-text">Try another search or create a new one.</p>
+            <p className="empty-title">No folders found</p>
+            <p className="empty-text">
+              Create your first cube folder to start tracking activities.
+            </p>
           </div>
         ) : (
           filteredCategories.map((category) => {
-            const isEditing = editingCategoryId === category.id
+            const count = categorySkillCounts[category.id] || 0
+            const isEditing = editingId === category.id
 
             return (
               <div key={category.id}>
                 <CategoryCard
                   category={category}
-                  skillCount={getSkillCount(category.id)}
+                  skillCount={count}
                   onClick={() => onOpenCategory(category.id)}
-                  onEdit={() => startEditCategory(category)}
+                  onEdit={() => startEdit(category)}
                   onDelete={() => onDeleteCategory(category.id)}
                 />
 
                 {isEditing && (
-                  <div className="panel-card category-edit-card">
-                    <h3 className="panel-title">Edit Category</h3>
+                  <div className="panel-card">
+                    <h3 className="panel-title">Edit Folder</h3>
 
                     <div className="field-group">
-                      <label className="field-label">Category Name</label>
+                      <label className="field-label">Folder Name</label>
                       <input
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
@@ -190,7 +211,7 @@ export default function HomePage({
                     </div>
 
                     <div className="field-group">
-                      <label className="field-label">Image URL</label>
+                      <label className="field-label">Cover Image URL</label>
                       <input
                         value={editImage}
                         onChange={(e) => setEditImage(e.target.value)}
@@ -202,7 +223,7 @@ export default function HomePage({
                       <button
                         type="button"
                         className="primary-button"
-                        onClick={() => saveEditCategory(category.id)}
+                        onClick={() => saveEdit(category.id)}
                       >
                         Save Changes
                       </button>
@@ -210,7 +231,7 @@ export default function HomePage({
                       <button
                         type="button"
                         className="secondary-button"
-                        onClick={cancelEditCategory}
+                        onClick={cancelEdit}
                       >
                         Cancel
                       </button>
