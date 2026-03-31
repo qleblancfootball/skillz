@@ -1093,40 +1093,63 @@ a {
   font-weight: 800;
 }
 
-.timer-overlay-panel {
-  position: absolute;
-  left: 20px;
-  right: 20px;
-  bottom: max(20px, calc(16px + env(safe-area-inset-bottom)));
-  margin: 0 auto;
-  width: min(100%, 720px);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(35, 42, 51, 0.98);
+.timer-overlay-button {
+  margin-top: 12px;
+}
+
+.timer-save-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
   padding: 18px;
-  z-index: 1;
-  box-shadow: var(--shadow);
-  max-height: 45vh;
+  background: rgba(10, 14, 20, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.timer-save-card {
+  width: min(100%, 560px);
+  max-height: min(88vh, 720px);
   overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  padding: 20px;
 }
 
-.timer-overlay-title {
-  margin-bottom: 14px;
-  text-align: center;
-  font-size: 24px;
+.timer-save-label {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
   font-weight: 900;
-  letter-spacing: -0.03em;
+  text-align: center;
 }
 
-.timer-secondary-button {
-  border-radius: 10px;
-  padding: 14px 16px;
-  background: var(--panel-3);
-  color: white;
+.timer-save-title {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: clamp(28px, 6vw, 42px);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.timer-save-meta {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: var(--panel-2);
   border: 1px solid var(--line);
+  border-radius: 12px;
+  color: #e7edf3;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.timer-action-row {
+.timer-save-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
@@ -1250,10 +1273,10 @@ a {
 
   .two-col-grid,
   .button-row,
-  .timer-action-row,
   .stat-grid,
   .summary-grid,
-  .mini-grid {
+  .mini-grid,
+  .timer-save-actions {
     grid-template-columns: 1fr;
   }
 
@@ -1294,20 +1317,17 @@ a {
     top: 118px;
   }
 
-  .timer-overlay-panel {
-    left: 12px;
-    right: 12px;
-    bottom: max(12px, calc(12px + env(safe-area-inset-bottom)));
-    width: auto;
-    max-height: 48vh;
-    padding: 14px;
+  .timer-save-modal {
+    padding: 12px;
   }
 
-  .timer-overlay-title {
-    font-size: 20px;
+  .timer-save-card {
+    width: 100%;
+    max-height: min(90vh, 900px);
+    padding: 16px;
   }
 
-  .timer-action-row {
-    grid-template-columns: 1fr;
+  .timer-save-title {
+    font-size: 30px;
   }
 }

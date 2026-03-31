@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   calculateAo5,
   compareGoalHit,
@@ -48,6 +48,10 @@ export default function RubiksTimerPage({
   const [ao5Solves, setAo5Solves] = useState([])
   const [ao5NeedsContinue, setAo5NeedsContinue] = useState(false)
   const [ao5Complete, setAo5Complete] = useState(false)
+
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [saveNote, setSaveNote] = useState('')
+  const [saveMode, setSaveMode] = useState('single') // single | ao5
 
   const rafRef = useRef(null)
   const readyTimeoutRef = useRef(null)
@@ -99,6 +103,12 @@ export default function RubiksTimerPage({
     setScrambleConfirmed(false)
   }
 
+  function closeSaveModal() {
+    setSaveModalOpen(false)
+    setSaveNote('')
+    setSaveMode('single')
+  }
+
   function animateTimer() {
     if (!startTimeRef.current) return
 
@@ -111,6 +121,8 @@ export default function RubiksTimerPage({
   function startTimer() {
     cancelAnimationFrame(rafRef.current)
     setStoppedSeconds(null)
+    setSaveNote('')
+    setSaveModalOpen(false)
     setTimerState('running')
     startTimeRef.current = performance.now()
     rafRef.current = requestAnimationFrame(animateTimer)
@@ -137,14 +149,23 @@ export default function RubiksTimerPage({
       if (updatedSolves.length === 5) {
         setAo5Complete(true)
         setAo5NeedsContinue(false)
+        setSaveMode('ao5')
+        setSaveModalOpen(true)
       } else {
         setAo5NeedsContinue(true)
       }
+
+      return
     }
+
+    setSaveMode('single')
+    setSaveModalOpen(true)
   }
 
   function handlePressStart(event) {
     event.preventDefault()
+
+    if (saveModalOpen) return
 
     if (currentStateRef.current === 'running') {
       stopTimer()
@@ -206,7 +227,7 @@ export default function RubiksTimerPage({
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [activityType, ao5NeedsContinue, scrambleConfirmed, ao5Solves])
+  }, [activityType, ao5NeedsContinue, scrambleConfirmed, ao5Solves, saveModalOpen])
 
   async function maybeCelebrateAndPrompt(savedValue) {
     if (!compareGoalHit(savedValue, skill.goal)) return
@@ -235,27 +256,15 @@ export default function RubiksTimerPage({
     }, 2200)
   }
 
-  async function promptSaveSingleSolve() {
+  async function saveSingleSolve() {
     if (stoppedSeconds === null) return
 
-    const shouldSave = window.confirm(
-      `Save ${formatSolveTime(stoppedSeconds)} to your leaderboard?`
-    )
-
-    if (!shouldSave) {
-      if (activityType === 'scramble_timer') {
-        resetTimerFace()
-        resetScrambleFlow()
-      } else {
-        resetTimerFace()
-      }
-      return
-    }
-
-    let note = ''
+    let note = saveNote.trim()
 
     if (activityType === 'scramble_timer' && selectedScramble) {
-      note = `Scramble: ${selectedScramble}`
+      note = note
+        ? `Scramble: ${selectedScramble}\n\n${note}`
+        : `Scramble: ${selectedScramble}`
     }
 
     await onSaveSolve({
@@ -264,7 +273,19 @@ export default function RubiksTimerPage({
       note,
     })
 
+    closeSaveModal()
     await maybeCelebrateAndPrompt(stoppedSeconds.toFixed(2))
+
+    if (activityType === 'scramble_timer') {
+      resetTimerFace()
+      resetScrambleFlow()
+    } else {
+      resetTimerFace()
+    }
+  }
+
+  function discardSingleSolve() {
+    closeSaveModal()
 
     if (activityType === 'scramble_timer') {
       resetTimerFace()
@@ -277,28 +298,31 @@ export default function RubiksTimerPage({
   async function saveAo5Session() {
     if (!ao5Complete || ao5Average === null) return
 
-    const shouldSave = window.confirm(
-      `Save Ao5 result ${formatSolveTime(ao5Average)} to your leaderboard?`
-    )
+    const noteLines = [
+      `Ao5 solves: ${ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}`,
+    ]
 
-    if (!shouldSave) {
-      setAo5Solves([])
-      setAo5NeedsContinue(false)
-      setAo5Complete(false)
-      resetTimerFace()
-      return
+    if (saveNote.trim()) {
+      noteLines.push('', saveNote.trim())
     }
-
-    const note = `Ao5 solves: ${ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}`
 
     await onSaveSolve({
       date: formatDateInput(),
       value: ao5Average.toFixed(2),
-      note,
+      note: noteLines.join('\n'),
     })
 
+    closeSaveModal()
     await maybeCelebrateAndPrompt(ao5Average.toFixed(2))
 
+    setAo5Solves([])
+    setAo5NeedsContinue(false)
+    setAo5Complete(false)
+    resetTimerFace()
+  }
+
+  function discardAo5Session() {
+    closeSaveModal()
     setAo5Solves([])
     setAo5NeedsContinue(false)
     setAo5Complete(false)
@@ -329,7 +353,7 @@ export default function RubiksTimerPage({
     if (timerState === 'holding') return 'Keep holding...'
     if (timerState === 'ready') return 'Release to start'
     if (timerState === 'running') return 'Tap screen or press space to stop'
-    if (timerState === 'stopped') return 'Solve complete'
+    if (timerState === 'stopped' && !saveModalOpen) return 'Solve complete'
 
     if (activityType === 'scramble_timer' && !scrambleConfirmed) {
       return 'Confirm the scramble to begin'
@@ -446,72 +470,71 @@ export default function RubiksTimerPage({
             Continue to Solve {currentAo5Number}
           </button>
         ) : null}
-
-        {activityType === 'ao5_timer' && ao5Complete ? (
-          <div className="timer-overlay-panel">
-            <div className="timer-overlay-title">
-              Ao5 Result: {ao5Average !== null ? formatSolveTime(ao5Average) : '—'}
-            </div>
-
-            <div className="timer-action-row">
-              <button
-                type="button"
-                className="timer-action-button"
-                onClick={saveAo5Session}
-              >
-                Save Ao5
-              </button>
-
-              <button
-                type="button"
-                className="timer-secondary-button"
-                onClick={() => {
-                  setAo5Solves([])
-                  setAo5NeedsContinue(false)
-                  setAo5Complete(false)
-                  resetTimerFace()
-                }}
-              >
-                Reset Session
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {(activityType === 'regular_timer' || activityType === 'scramble_timer') &&
-        timerState === 'stopped' ? (
-          <div className="timer-overlay-panel">
-            <div className="timer-overlay-title">
-              Solve: {formatSolveTime(stoppedSeconds)}
-            </div>
-
-            <div className="timer-action-row">
-              <button
-                type="button"
-                className="timer-action-button"
-                onClick={promptSaveSingleSolve}
-              >
-                Continue
-              </button>
-
-              <button
-                type="button"
-                className="timer-secondary-button"
-                onClick={() => {
-                  if (activityType === 'scramble_timer') {
-                    resetTimerFace()
-                    resetScrambleFlow()
-                  } else {
-                    resetTimerFace()
-                  }
-                }}
-              >
-                Discard
-              </button>
-            </div>
-          </div>
-        ) : null}
       </div>
+
+      {saveModalOpen ? (
+        <div className="timer-save-modal">
+          <div className="timer-save-card">
+            <p className="timer-save-label">
+              {saveMode === 'ao5' ? 'Average of 5 Complete' : 'Solve Complete'}
+            </p>
+
+            <h2 className="timer-save-title">
+              {saveMode === 'ao5'
+                ? `Ao5: ${ao5Average !== null ? formatSolveTime(ao5Average) : '—'}`
+                : `Time: ${formatSolveTime(stoppedSeconds)}`}
+            </h2>
+
+            {saveMode === 'single' && activityType === 'scramble_timer' && selectedScramble ? (
+              <div className="timer-save-meta">
+                <strong>Scramble:</strong> {selectedScramble}
+              </div>
+            ) : null}
+
+            {saveMode === 'ao5' ? (
+              <div className="timer-save-meta">
+                <strong>Solves:</strong>{' '}
+                {ao5Solves.map((solve) => formatSolveTime(solve)).join(', ')}
+              </div>
+            ) : null}
+
+            <div className="field-group">
+              <label className="field-label">
+                Add Notes {saveMode === 'ao5' ? '(optional)' : '(optional)'}
+              </label>
+              <textarea
+                value={saveNote}
+                onChange={(e) => setSaveNote(e.target.value)}
+                rows="5"
+                className="app-input app-textarea"
+                placeholder={
+                  saveMode === 'ao5'
+                    ? 'Add notes about this Ao5 session'
+                    : 'Add notes about this solve'
+                }
+              />
+            </div>
+
+            <div className="timer-save-actions">
+              <button
+                type="button"
+                className="timer-action-button"
+                onClick={saveMode === 'ao5' ? saveAo5Session : saveSingleSolve}
+              >
+                Add to Leaderboard
+              </button>
+
+              <button
+                type="button"
+                className="timer-secondary-button"
+                onClick={saveMode === 'ao5' ? discardAo5Session : discardSingleSolve}
+              >
+                Do Not Add
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
